@@ -1,0 +1,524 @@
+Traffic Simulation — Changelog
+===============================
+
+This document records all changes made to the ChatGPT-generated notebook
+(chatgpt-notebook.ipynb) to produce the improved version (traffic_simulation.ipynb).
+Each section corresponds to a task from the CS166 LBA assignment.
+
+
+================================================================================
+TASK 1: CODE IMPROVEMENTS
+================================================================================
+
+1a. Bug Fixes
+-------------
+
+1. NetworkXNoPath crash
+   - Problem: The road network is a directed graph (one-way streets). Randomly
+     chosen start/destination pairs may have no directed path between them,
+     causing nx.shortest_path() to raise NetworkXNoPath.
+   - Fix: After loading the graph, extract the largest strongly connected
+     component. This guarantees every node can reach every other node.
+   - Location: RoadNetwork.__init__()
+
+2. path.pop(0) pops the wrong node
+   - Problem: nx.shortest_path() returns [current, next, ...]. The original
+     code did next_node = car.path.pop(0), which popped the current location
+     instead of the next node. On the first step the car "moves" to where it
+     already is; on later steps it skips a node.
+   - Fix: After computing the path, slice off index 0 immediately:
+     car.path = nx.shortest_path(...)[1:]
+     Then path[0] is always the genuine next node.
+   - Location: TrafficSimulation._move_cars()
+
+3. simulate_traffic() doesn't return cars
+   - Problem: cars was a local variable inside simulate_traffic(). The
+     visualization cell referenced cars but it was out of scope, causing a
+     NameError (or silently using stale data from a previous cell run).
+   - Fix: Wrapped simulation state in the TrafficSimulation class. The cars
+     list is accessible as sim.cars, and run() returns self for chaining.
+   - Location: TrafficSimulation.run()
+
+4. Visualization uses osmid instead of node IDs
+   - Problem: plot_network_with_traffic() looked up edge counts using
+     data['osmid'] (the OpenStreetMap way ID) instead of the graph's actual
+     (u, v) node IDs. Every lookup returned 0, so the heatmap was blank.
+   - Fix: Iterate with (u, v, k, data) and look up counts[(u, v, k)].
+   - Location: TrafficSimulation.plot_traffic()
+
+5. Graph loaded 3 separate times
+   - Problem: Cells 3, 5, and 6 each called ox.graph_from_address(). This
+     made 3 separate API calls, and travel_time was only added to one copy.
+   - Fix: Load once in RoadNetwork.__init__() and reuse everywhere.
+   - Location: RoadNetwork.__init__()
+
+6. Division by zero in visualization
+   - Problem: max(counts.values()) is 0 when all cars have arrived, causing
+     division by zero in the color mapping.
+   - Fix: Use max(max_count, 1).
+   - Location: TrafficSimulation.plot_traffic()
+
+
+1b. Object-Oriented Restructuring
+----------------------------------
+
+- Created RoadNetwork class: encapsulates graph loading, strongly-connected-
+  component filtering, travel time computation, and plotting.
+- Improved Car class: added has_arrived property for cleaner arrival checks.
+- Created TrafficSimulation class: encapsulates car list, movement logic,
+  edge counting, congestion history tracking, and all visualization methods.
+  run() returns self for convenient method chaining.
+
+
+1c. Comments and Docstrings
+----------------------------
+
+- Added docstrings to all classes and methods.
+- All changes from the original are marked with "# CHANGE:" comments
+  in the notebook for easy identification.
+- Task 3 changes are marked with "# CHANGE (Task 3):" to distinguish them.
+
+
+================================================================================
+TASK 2: MODEL EXPLANATION AND IMPROVEMENTS
+================================================================================
+
+2a. How the Simulation Works
+-----------------------------
+
+The simulation models traffic as discrete agents (cars) moving through a road
+network represented as a directed graph.
+
+NETWORK SETUP:
+The road network is loaded from OpenStreetMap via the osmnx library. The graph
+is directed — edges have a direction, reflecting one-way streets. Nodes represent
+intersections and dead-ends. Edges represent road segments between intersections.
+Each edge carries metadata from OSM including length (meters) and speed limit.
+A "travel_time" attribute is computed for each edge as:
+
+    travel_time = length / (speed * 1000/60)
+
+where length is in meters and speed is in km/h. This yields travel time in
+minutes. If no speed limit is available in OSM data, a default of 30 km/h is
+assumed. If multiple speed limits exist (e.g., for lanes), the first is used.
+
+After loading, the graph is reduced to its largest strongly connected component
+to ensure every node can reach every other node.
+
+CAR INITIALIZATION:
+A fixed number of cars (default 100) are created, each assigned a random start
+node and a random destination node from the network. All cars are spawned
+simultaneously at the start of the simulation.
+
+MOVEMENT LOGIC (per time step):
+For each car that hasn't arrived yet:
+
+  1. If the car has no planned path, compute the shortest path from its current
+     node to its destination using Dijkstra's algorithm, weighted by travel_time.
+     The path is stored as an ordered list of nodes to visit (excluding the
+     current location).
+
+  2. Look at the next node in the path. Count how many other cars are also at
+     the same current node AND trying to move to the same next node (i.e., how
+     many cars share this edge right now).
+
+  3. If that count exceeds the congestion threshold (default 5), the car does
+     NOT move — it waits at its current node for this step.
+
+  4. If the edge is not congested, the car advances: it pops the next node from
+     its path and updates its current_location to that node.
+
+  5. A car that reaches its destination stops moving permanently.
+
+This repeats for a fixed number of time steps (default 10). Each step, every
+car gets one chance to move one edge forward.
+
+
+2b. What the Simulation Captures Effectively
+---------------------------------------------
+
+1. REAL ROAD TOPOLOGY: The network comes directly from OpenStreetMap, so the
+   graph accurately reflects actual intersections, road connectivity, one-way
+   streets, and road segment lengths for the chosen area. This is a major
+   strength — the simulation operates on real geography, not an artificial grid.
+
+2. SHORTEST-PATH ROUTING: Cars use Dijkstra's algorithm weighted by travel
+   time, which is a reasonable model of how drivers navigate. Real drivers
+   generally seek the fastest route, and navigation apps (Google Maps, Waze)
+   use similar shortest-path algorithms.
+
+3. DIRECTED EDGES / ONE-WAY STREETS: The directed graph naturally handles
+   one-way streets — cars cannot drive the wrong way. This is important in
+   urban areas like Buenos Aires where many streets are one-way.
+
+4. SPEED LIMITS: Travel times incorporate actual speed limit data from OSM
+   where available, so faster roads (avenidas) are preferred over slower
+   residential streets, matching real driver behavior.
+
+5. BASIC CONGESTION FEEDBACK: When too many cars pile onto the same edge,
+   movement is blocked. This captures the fundamental idea that road capacity
+   is finite — you can't have unlimited cars on a single road segment.
+
+6. EMERGENT BOTTLENECKS: Because all cars independently choose shortest paths,
+   popular roads (high betweenness centrality) naturally attract more traffic.
+   Congestion emerges from the structure of the network itself, which is
+   realistic — real bottlenecks occur at the same structural chokepoints.
+
+
+2c. Simplifications and Limitations
+-------------------------------------
+
+1. DISCRETE, NODE-TO-NODE MOVEMENT: Cars teleport from one intersection to the
+   next in a single step, regardless of edge length. A 50-meter side street and
+   a 2-kilometer avenue both take exactly one time step to traverse. In reality,
+   longer roads take longer to drive. This means the simulation does not
+   accurately represent travel time along edges — the travel_time attribute is
+   used for path planning but NOT for actual movement speed.
+
+2. BINARY CONGESTION MODEL: Congestion is all-or-nothing. If <= 5 cars share
+   an edge, they all move at full speed. If > 5, they all stop completely. Real
+   traffic doesn't work this way — speed decreases gradually as density
+   increases. There is no partial slowdown.
+
+3. STATIC ROUTING: Each car computes its path once and never reconsiders. Real
+   drivers (and navigation apps) reroute when they encounter congestion. This
+   means simulated cars will keep trying to use a jammed road rather than
+   finding an alternative, which can cause unrealistic gridlock.
+
+4. NO TRAFFIC SIGNALS OR INTERSECTIONS: There are no traffic lights, stop
+   signs, roundabouts, or turn delays. In reality, intersection control is a
+   major source of delay and affects which routes are fastest.
+
+5. ALL CARS SPAWN SIMULTANEOUSLY: Every car appears at step 0. Real traffic
+   has a continuous flow of cars entering and leaving the network over time.
+   The simulation cannot model rush hour buildup or time-varying demand.
+
+6. UNIFORM EDGE CAPACITY: The congestion threshold is the same for every edge
+   (default 5 cars). In reality, a six-lane avenida can handle far more cars
+   than a narrow one-lane street. Road capacity depends on the number of lanes,
+   road width, and other geometric properties.
+
+7. NO VEHICLE HETEROGENEITY: All cars behave identically — same speed, same
+   routing logic, same size. Real traffic includes trucks, buses, motorcycles,
+   and cars, each with different speeds and space requirements.
+
+8. NO POSITION ALONG EDGES: Cars exist only at nodes (intersections). We don't
+   track where along an edge a car is. This makes it impossible to model
+   queuing on a road — in reality, cars back up along the length of a road
+   when congestion occurs.
+
+9. PATHS ARE COMPUTED ON FREE-FLOW TIMES: The shortest path uses the
+   travel_time computed from speed limits, not from actual experienced
+   congestion. A car doesn't "know" that a road is jammed when choosing its
+   route — it assumes free-flow conditions.
+
+
+2d. Congestion Modeling: Current Approach and Improvements
+-----------------------------------------------------------
+
+CURRENT APPROACH:
+The model uses a simple threshold: count the number of cars on each edge at
+each time step. If more than 5 cars share the same edge (i.e., are at the same
+node trying to move to the same next node), all of them are blocked — none move.
+If 5 or fewer, they all move freely.
+
+This is problematic for several reasons:
+- The threshold of 5 is arbitrary and has no relationship to actual road
+  capacity (which depends on road width, number of lanes, etc.).
+- The response is binary: below threshold → free flow, above threshold → total
+  stop. There is no middle ground.
+- It doesn't account for the length of the road — a short alley and a long
+  avenue have the same capacity.
+
+PROPOSED IMPROVEMENT — DENSITY-BASED SPEED MODEL:
+A much more realistic approach draws from the fundamental diagram of traffic
+flow, specifically the Greenshields model (which may align with results from
+Session 9). The key insight is that vehicle speed decreases continuously as
+traffic density increases:
+
+    v = v_free * (1 - density / density_jam)
+
+where:
+  - v_free   = free-flow speed (the speed limit, or the speed with no traffic)
+  - density  = current number of cars per unit length of road
+  - density_jam = maximum density (bumper-to-bumper, no movement)
+
+To implement this, we would need to:
+
+  1. TRACK POSITION ALONG EDGES: Instead of cars being "at a node," each car
+     has a position (in meters) along its current edge. When a car's position
+     reaches the edge length, it moves to the next edge.
+
+  2. COMPUTE DENSITY PER EDGE: At each step, for each edge, count the number
+     of cars on it and divide by the edge length to get density (cars/meter).
+     The density_jam could be estimated from road properties — for example,
+     assuming average car length of 5m plus 2m gap, density_jam ≈ 1/7 ≈ 0.14
+     cars/meter per lane. For a 2-lane road, density_jam ≈ 0.28 cars/meter.
+
+  3. COMPUTE SPEED FROM DENSITY: Using the Greenshields relationship, calculate
+     the actual speed of cars on that edge. As more cars pile onto the road,
+     everyone on it slows down proportionally.
+
+  4. ADVANCE CARS BY SPEED * DT: Each time step, each car advances along its
+     edge by (v * dt) meters, where dt is the time step duration (e.g., 1
+     minute). Cars on empty roads move at v_free; cars on crowded roads crawl.
+
+  5. VARY CAPACITY BY ROAD TYPE: Use OSM lane data (where available) to set
+     per-edge density_jam values. An avenida with 3 lanes per direction would
+     have ~6x the capacity of a single-lane street.
+
+This approach eliminates the arbitrary threshold entirely. Congestion is no
+longer a binary state but a continuous spectrum from free flow to gridlock,
+matching the physics of real traffic. It also naturally captures the fact that
+longer roads can hold more cars before becoming congested, and that different
+road types have different capacities.
+
+A further improvement would be to implement DYNAMIC ROUTING: periodically
+recompute shortest paths using current (congested) travel times rather than
+free-flow times. This would model drivers rerouting around jams, which is an
+important real-world behavior that prevents the artificial gridlock the current
+model can produce.
+
+
+================================================================================
+TASK 3: VISUALIZATION IMPROVEMENTS
+================================================================================
+
+3a. Problems with ChatGPT's Original Visualization
+---------------------------------------------------
+
+ChatGPT's plot_network_with_traffic() colored and thickened edges based on
+car count. Even after the bug fixes in Task 1, it had these issues:
+
+- No legend/colorbar: no way to tell what a color means quantitatively.
+- No street names: you can see a red edge but can't identify which road it is.
+- Dark background: osmnx's default black background is hard to read and print.
+- Snapshot only: shows traffic at the final step, not where congestion
+  accumulated over the entire simulation.
+- No summary view: no way to rank or compare roads by congestion level.
+
+
+3b. Changes Made
+-----------------
+
+1. Cumulative congestion tracking (TrafficSimulation.__init__ + run)
+   - Added cumulative_edge_counts dict and history list.
+   - run() now records edge counts at every step, enabling time-series
+     analysis and cumulative heatmaps.
+
+2. New method: plot_congestion_heatmap()
+   - Shows cumulative congestion across all simulation steps.
+   - Uses YlOrRd colormap on a white background for readability.
+   - Includes a colorbar legend mapping color to car-step count.
+
+3. New method: plot_top_congested_roads(top_n)
+   - Horizontal bar chart ranking streets by cumulative congestion.
+   - Aggregates multi-segment streets by name so full roads appear as one bar.
+
+4. New method: plot_congestion_over_time(top_n)
+   - Two-panel line plot.
+   - Left: total network congestion per step.
+   - Right: per-street congestion for the top N roads.
+
+5. Helper method: get_street_name(u, v, k)
+   - Looks up OSM street name for an edge; returns "Unnamed" if missing.
+
+
+3c. How to Interpret the Visualizations
+----------------------------------------
+
+1. Cumulative Congestion Heatmap (plot_congestion_heatmap)
+   - Each edge is colored from yellow (low) to dark red (high) based on
+     the total number of car-steps it carried across all simulation steps.
+   - A "car-step" = one car on that edge during one time step. An edge
+     with 3 cars for 4 steps accumulates 12 car-steps.
+   - The colorbar on the right maps colors to numerical values.
+   - Thicker edges also indicate higher congestion.
+   - Use this to spatially identify which parts of the road network are
+     bottlenecks.
+
+2. Top Congested Roads Bar Chart (plot_top_congested_roads)
+   - Lists the top N streets ranked by cumulative car-steps.
+   - Multi-segment streets (e.g., a long road split into many edges) are
+     summed together, so the chart reflects the full road's load.
+   - Use this to quickly answer: "Which streets are the worst bottlenecks?"
+
+3. Congestion Over Time (plot_congestion_over_time)
+   - Left panel: total cars in transit across the whole network at each step.
+     A rising line means congestion is building; a falling line means cars
+     are reaching their destinations faster than new congestion forms.
+   - Right panel: per-street breakdown for the top N most congested roads.
+     A street that stays high across many steps is a persistent bottleneck.
+     A street that spikes and drops may be a temporary chokepoint.
+   - Use this to understand the dynamics of congestion — is it transient
+     or structural?
+
+
+================================================================================
+TASK 4: CONGESTION ANALYSIS AND PREDICTION
+================================================================================
+
+4a. Empirical Congestion Analysis
+-----------------------------------
+
+APPROACH:
+A single simulation run is noisy — random car placements mean different roads
+get congested each time. To find which roads are *structurally* prone to
+congestion (not just unlucky in one run), we run 50 independent simulations
+with 100 cars each for 15 steps, and average the cumulative car-steps per edge.
+
+This produces a stable congestion profile: roads that consistently carry heavy
+traffic across many randomized runs are genuinely bottleneck-prone, not just
+artifacts of one particular set of car placements.
+
+MEASURE OF CONGESTION:
+We use "average cumulative car-steps per run" as our congestion metric. This
+counts the total number of (car, time step) pairs on each edge, averaged over
+all runs. It captures both intensity (many cars at once) and duration (cars
+present for many steps). An edge with 3 cars for 10 steps scores 30, which is
+worse than an edge with 10 cars for 1 step (score 10), reflecting that
+sustained congestion is more impactful than a brief spike.
+
+VISUALIZATIONS:
+- Multi-run averaged heatmap: shows the spatial distribution of congestion
+  across the road network, averaged over all 50 runs. Interpretation is the
+  same as the Task 3 heatmap but much more reliable (reduces random noise).
+- Top 20 congested roads bar chart: ranks streets by average congestion,
+  aggregated across all edge segments of each street.
+
+CHANGES:
+- Added scipy import for statistical correlation (stats.spearmanr, stats.pearsonr).
+- New cells run 50 simulation instances and aggregate edge counts.
+- Heatmap and bar chart use averaged data instead of single-run data.
+
+
+4b. Network Metrics as Congestion Predictors
+----------------------------------------------
+
+APPROACH:
+We test whether the structure of the road network alone — without running any
+simulation — can predict which roads will be congested. This is valuable
+because computing a network metric is nearly instant, while running 50
+simulations is slow.
+
+We compute four network metrics (following Sayama Ch. 17) and correlate each
+with the empirical congestion from Task 4a using Spearman rank correlation:
+
+1. EDGE BETWEENNESS CENTRALITY: For each edge, what fraction of all shortest
+   paths in the network pass through it? Weighted by travel_time so the metric
+   uses the same routing logic as the cars. This is the most natural candidate
+   because cars in our simulation literally follow shortest paths — an edge
+   that lies on many shortest paths should see many cars.
+
+2. NODE BETWEENNESS CENTRALITY (averaged over endpoints): Same idea but at the
+   node level — nodes that act as bridges between different parts of the network.
+   We average the two endpoint values to get an edge-level score.
+
+3. DEGREE CENTRALITY (averaged over endpoints): How well-connected are the
+   intersections at each end of the edge? Highly connected intersections might
+   attract more traffic from more directions.
+
+4. CLOSENESS CENTRALITY (averaged over endpoints): How "central" are the
+   endpoints in terms of distance to all other nodes? Central locations may
+   see more through-traffic.
+
+WHY SPEARMAN CORRELATION:
+Spearman rank correlation measures monotonic relationships without assuming
+linearity. This is appropriate because the relationship between a network
+metric and congestion may not be linear — e.g., edges with very high
+betweenness might see disproportionately more congestion due to cascading
+jams. Spearman captures "higher metric → higher congestion" regardless of
+the exact functional form.
+
+EXPECTED RESULT:
+Edge betweenness centrality should be the strongest predictor because it
+directly measures how many shortest paths cross each edge, and our cars
+use shortest paths. The correlation won't be perfect because (a) congestion
+itself causes some cars to be delayed on edges they wouldn't otherwise be on,
+and (b) the threshold-based jamming creates nonlinear feedback.
+
+VISUALIZATIONS:
+- 2x2 scatter plot grid: each metric vs. empirical congestion with trend line
+  and Spearman r value. Lets you visually assess the strength and shape of
+  each relationship.
+- Side-by-side network maps: empirical congestion (left) vs. best metric
+  prediction (right). If the metric is a good predictor, the two maps should
+  highlight the same edges.
+
+CHANGES:
+- New cells compute all four network metrics using NetworkX.
+- Correlation analysis prints Spearman and Pearson r values.
+- Scatter plots and side-by-side map comparison added.
+
+
+4c. Validation on a Different Location
+-----------------------------------------
+
+APPROACH:
+To test whether our findings generalize, we repeat the entire analysis on a
+different Buenos Aires neighborhood: Plaza Italia / Palermo. This area has a
+different road structure from the downtown Corrientes area — more diagonal
+avenues, larger blocks, and parks that create network gaps.
+
+We load a new 1km-radius network around Plaza Italia, run 50 simulations, and
+compute all four metrics. If the best metric from Task 4b still correlates
+well with empirical congestion in this new area, it's a robust predictor that
+works across different network topologies — not just overfit to one neighborhood.
+
+VISUALIZATIONS:
+- Validation network plot: shows the Plaza Italia road network.
+- Correlation results table: Spearman r for all four metrics on the new network.
+- Side-by-side map: empirical vs. predicted congestion on the new network.
+- Top 15 congested roads bar chart: identifies the worst bottlenecks in
+  the Palermo area.
+
+HOW TO INTERPRET THE VALIDATION RESULTS:
+- If the Spearman r for the best metric is similar in both locations (e.g.,
+  both > 0.5), the metric generalizes well.
+- If the metric works in one area but not the other, it may be sensitive to
+  network topology (e.g., grid vs. radial layouts).
+- The bar chart reveals which specific streets in Palermo are congested and
+  can be cross-referenced with local knowledge (e.g., Avenida Santa Fe,
+  Avenida del Libertador are known to be busy in real life).
+
+CHANGES:
+- New cells load Plaza Italia network via RoadNetwork class.
+- 50 simulation runs on the validation network.
+- Full metric computation and correlation analysis repeated.
+- Side-by-side comparison and bar chart for the new area.
+
+
+================================================================================
+NOTEBOOK STRUCTURE
+================================================================================
+
+Cell 0:  Markdown — title and overview
+Cell 1:  Code    — imports (+ scipy.stats for Task 4)
+Cell 2:  Code    — RoadNetwork class
+Cell 3:  Code    — Car class
+Cell 4:  Code    — TrafficSimulation class
+Cell 5:  Markdown — section: load and visualize network
+Cell 6:  Code    — load network (Av. Corrientes, Buenos Aires)
+Cell 7:  Code    — plot network
+Cell 8:  Markdown — section: run simulation
+Cell 9:  Code    — run simulation
+Cell 10: Markdown — section: visualize traffic density (original, fixed)
+Cell 11: Code    — plot_traffic() snapshot
+Cell 12: Markdown — section: improved visualizations (Task 3)
+Cell 13: Code    — cumulative congestion heatmap
+Cell 14: Code    — top congested roads bar chart
+Cell 15: Code    — congestion over time line plot
+Cell 16: Markdown — section: Task 4a empirical analysis
+Cell 17: Code    — run 50 simulations, aggregate congestion
+Cell 18: Code    — multi-run averaged heatmap
+Cell 19: Code    — top 20 congested roads (averaged)
+Cell 20: Markdown — section: Task 4b network metrics
+Cell 21: Code    — compute metrics + correlation analysis
+Cell 22: Code    — scatter plots (metrics vs. congestion)
+Cell 23: Code    — side-by-side map (empirical vs. predicted)
+Cell 24: Markdown — section: Task 4c validation
+Cell 25: Code    — load Plaza Italia network
+Cell 26: Code    — run 50 simulations on validation network
+Cell 27: Code    — compute metrics + correlation on validation
+Cell 28: Code    — side-by-side map (validation)
+Cell 29: Code    — top 15 congested roads (validation)
