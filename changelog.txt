@@ -280,6 +280,47 @@ important real-world behavior that prevents the artificial gridlock the current
 model can produce.
 
 
+2d-IMPLEMENTATION. Greenshields Model Implementation
+------------------------------------------------------
+
+The proposed Greenshields model was implemented via two subclasses:
+
+1. ImprovedCar(Car):
+   - Adds position (meters along current edge), current_edge, and speed attributes
+   - Inherits everything else from Car
+
+2. ImprovedTrafficSimulation(TrafficSimulation):
+   - Precomputes per-edge properties from OSM data:
+     - edge_jam_density: 0.04 cars/m/lane (scaled for simulation's car count)
+     - edge_free_speed: km/h → meters/step (1 step ≈ 1 minute)
+     - edge_length: from OSM
+   - Overrides _move_cars(): counts cars per edge, computes density, applies
+     Greenshields (v = v_free * max(1 - rho/rho_jam, 0.05)), advances car
+     position, transitions to next edge when position >= length
+   - Overrides get_edge_counts(): counts cars by current_edge (not next node)
+   - Overrides run(): stores position_history and density_history for animations
+   - Adds get_avg_density(): average density per edge across all steps
+   - Adds _interpolate_car_position(): computes lat/lon from edge geometry for
+     animation (uses shapely interpolation when edge geometry available)
+
+3. New visualizations for the improved model:
+   a. Car animation: FuncAnimation showing dots (cars) moving along edges,
+      visibly slowing on congested roads
+   b. Density animation: FuncAnimation showing edge colors changing over time
+      as density builds and dissipates (YlOrRd colormap, colorbar in cars/meter)
+   c. Average density heatmap: static summary of average density per edge —
+      the improved model's equivalent of the cumulative congestion heatmap,
+      but accounting for road length
+
+4. Task 4a/4b/4c updated to use ImprovedTrafficSimulation:
+   - Multi-run averaging now aggregates density (cars/meter) instead of
+     cumulative car-steps
+   - Network metric correlations computed against average density
+   - Density is a more meaningful congestion measure because it accounts for
+     road length (a short road with 3 cars is more congested than a long road
+     with 3 cars)
+
+
 ================================================================================
 TASK 3: VISUALIZATION IMPROVEMENTS
 ================================================================================
@@ -508,17 +549,27 @@ Cell 12: Markdown — section: improved visualizations (Task 3)
 Cell 13: Code    — cumulative congestion heatmap
 Cell 14: Code    — top congested roads bar chart
 Cell 15: Code    — congestion over time line plot
-Cell 16: Markdown — section: Task 4a empirical analysis
-Cell 17: Code    — run 50 simulations, aggregate congestion
-Cell 18: Code    — multi-run averaged heatmap
-Cell 19: Code    — top 20 congested roads (averaged)
-Cell 20: Markdown — section: Task 4b network metrics
-Cell 21: Code    — compute metrics + correlation analysis
-Cell 22: Code    — scatter plots (metrics vs. congestion)
-Cell 23: Code    — side-by-side map (empirical vs. predicted)
-Cell 24: Markdown — section: Task 4c validation
-Cell 25: Code    — load Plaza Italia network
-Cell 26: Code    — run 50 simulations on validation network
-Cell 27: Code    — compute metrics + correlation on validation
-Cell 28: Code    — side-by-side map (validation)
-Cell 29: Code    — top 15 congested roads (validation)
+Cell 16: Markdown — section: improved congestion model (Task 2d implementation)
+Cell 17: Code    — additional imports (FuncAnimation, HTML, shapely)
+Cell 18: Code    — ImprovedCar + ImprovedTrafficSimulation classes
+Cell 19: Code    — run improved simulation
+Cell 20: Markdown — section: car animation
+Cell 21: Code    — animate cars moving through network
+Cell 22: Markdown — section: density animation
+Cell 23: Code    — animate edge density over time
+Cell 24: Markdown — section: average density heatmap
+Cell 25: Code    — static average density heatmap
+Cell 26: Markdown — section: Task 4a empirical analysis
+Cell 27: Code    — run 50 improved simulations, aggregate density
+Cell 28: Code    — multi-run averaged density heatmap
+Cell 29: Code    — top 20 congested roads by density (averaged)
+Cell 30: Markdown — section: Task 4b network metrics
+Cell 31: Code    — compute metrics + correlate with density
+Cell 32: Code    — scatter plots (metrics vs. density)
+Cell 33: Code    — side-by-side map (empirical vs. predicted)
+Cell 34: Markdown — section: Task 4c validation
+Cell 35: Code    — load Plaza Italia network
+Cell 36: Code    — run 50 improved simulations on validation network
+Cell 37: Code    — compute metrics + correlation on validation
+Cell 38: Code    — side-by-side map (validation)
+Cell 39: Code    — top 15 congested roads (validation)
