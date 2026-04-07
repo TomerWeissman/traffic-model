@@ -45,7 +45,7 @@
 \section{Introduction}
 % ============================================================================
 
-This report documents the analysis and improvement of a ChatGPT-generated traffic simulation built on a real road network loaded from OpenStreetMap. The original notebook contained several bugs that prevented it from running, and its congestion model (a binary threshold that either allows or blocks all movement) fails to capture how real traffic behaves.
+This project starts with a ChatGPT-generated traffic simulation built on a real road network loaded from OpenStreetMap. The original notebook contained several bugs that prevented it from running, and its congestion model (a binary threshold that either allows or blocks all movement) fails to capture how real traffic behaves.
 
 The goals of this project are to:
 \begin{enumerate}
@@ -137,7 +137,7 @@ The simulation runs for a fixed number of steps (default 10).
 
 \subsection{Original Visualizations}
 
-Three visualizations were added to the bug-fixed simulation. Importantly, although these figures color \textit{edges}, the underlying data is entirely node-based. Cars exist only at nodes, and congestion is determined by counting cars at the same node competing for the same next node. The edge colors simply reflect how many times a car jumped from one node to the next across that edge. Section~4 explains why this is a fundamental limitation.
+Three visualizations were added to the bug-fixed simulation. Although these figures color \textit{edges}, the underlying data is entirely node-based. Cars exist only at nodes, and congestion is determined by counting cars at the same node competing for the same next node. The edge colors simply reflect how many times a car jumped from one node to the next across that edge. Section~4 explains why this is a fundamental limitation.
 
 \begin{figure}[H]
     \centering
@@ -190,10 +190,10 @@ Because congestion is binary, the visualizations can only show where cars \texti
 
 We needed a model that incorporates road-level density (cars per meter) and converts it into a continuous speed. The Greenshields speed-density relationship \citep{greenshields1935} does exactly this with a single linear equation whose two parameters, $v_{\text{free}}$ (speed limit) and $\rho_{\text{jam}}$ (jam density from lane count), are both already available in the OpenStreetMap data. No calibration is required, and because our analysis focuses on \textit{relative} congestion patterns rather than exact travel times, the linear approximation is sufficient. The relationship is:
 \begin{equation}
-    v = v_{\text{free}} \times \max\!\left(1 - \frac{\rho}{\rho_{\text{jam}}},\; 0\right)
+    v = v_{\text{free}} \times \max\!\left(1 - \frac{\rho}{\rho_{\text{jam}}},\; 0.05\right)
     \label{eq:greenshields}
 \end{equation}
-where $v_{\text{free}}$ is the free-flow speed (the posted speed limit from OSM data, i.e.\ the speed a car travels when alone on the road), $\rho$ is the current density (cars/meter on the edge), and $\rho_{\text{jam}}$ is the jam density (the maximum number of cars per meter that can physically fit on the road, determined by the number of lanes, so more lanes means more cars can pack in before the road is fully jammed). In our implementation, $\rho_{\text{jam}} = 0.04 \times \text{lanes}$~cars/meter; the standard traffic engineering value is ${\sim}0.15$~cars/m/lane (${\sim}$one car every 7~m), but we scale it down so that congestion effects are visible with the simulation's relatively small car counts. Speed decreases continuously as density increases: at zero density, cars travel at free-flow speed; at jam density, they stop.
+where $v_{\text{free}}$ is the free-flow speed (the posted speed limit from OSM data, i.e.\ the speed a car travels when alone on the road), $\rho$ is the current density (cars/meter on the edge), and $\rho_{\text{jam}}$ is the jam density (the maximum number of cars per meter that can physically fit on the road, determined by the number of lanes, so more lanes means more cars can pack in before the road is fully jammed). In our implementation, $\rho_{\text{jam}} = 0.04 \times \text{lanes}$~cars/meter; the standard traffic engineering value is ${\sim}0.15$~cars/m/lane (${\sim}$one car every 7~m), but we scale it down so that congestion effects are visible with the simulation's relatively small car counts. Speed decreases continuously as density increases: at zero density, cars travel at free-flow speed; at jam density, they slow to 5\% of free-flow speed (the floor prevents cars from fully stopping, which would deadlock the simulation).
 
 \subsection{Implementation}
 
@@ -229,17 +229,17 @@ The improved simulation can be understood as a cellular automaton (CA) operating
 
 This contrasts with the Nagel-Schreckenberg (NaSch) model \citep{nagel1992}, the canonical traffic CA. NaSch operates on a one-dimensional lattice where each cell is a road position and the state is ``car or empty.'' Each car follows four micro-rules per step: accelerate (up to a max speed), brake (if the car ahead is too close), randomly decelerate (modeling human unpredictability), and move forward. Our model operates on a network graph where cells are edges and the state is a continuous density value, updated by a single macro-rule (Greenshields).
 
-Both are cellular automata, but at different scales. NaSch is \textit{microscopic}: it tracks individual car decisions (accelerate, brake, hesitate). Our model is \textit{macroscopic}: it tracks aggregate density and derives speed from it. The microscopic approach captures phenomena like phantom traffic jams (spontaneous stop-and-go waves), while the macroscopic approach captures how network topology distributes and concentrates congestion. The bonus section exploits this CA-on-a-network framing to study how different graph topologies affect the onset of gridlock.
+Both are cellular automata, but at different scales. NaSch is \textit{microscopic}: it tracks individual car decisions (accelerate, brake, hesitate). Our model is \textit{macroscopic}: it tracks aggregate density and derives speed from it. The microscopic approach captures phenomena like phantom traffic jams (spontaneous stop-and-go waves), while the macroscopic approach captures how network topology distributes and concentrates congestion. Section~\ref{sec:gridlock} uses this framing to compare how different graph topologies handle increasing traffic.
 
 
 % ============================================================================
 \section{Limitations and Assumptions}
 % ============================================================================
 
-The improved model addresses the structural problems of the original, but it introduces its own simplifications. These are deliberate trade-offs: each one makes the simulation more tractable while preserving the qualitative behavior we care about (relative congestion patterns and topology effects).
+The improved model addresses the structural problems of the original, but it introduces its own simplifications. Each simplification is a trade-off, but none of them affect the relative congestion patterns that our analysis depends on.
 
 \paragraph{Linear speed-density relationship.}
-The Greenshields model assumes that speed decreases \textit{linearly} with density. In reality, the speed-density relationship is nonlinear; alternative models such as Greenberg (logarithmic) and Underwood (exponential) better capture the sharp speed drop near jam density. We chose Greenshields because it has a single parameter ($\rho_{\text{jam}}$), is analytically transparent, and produces qualitatively correct behavior: free flow at low density, gradual slowdown, and gridlock at jam density. Since our analysis focuses on \textit{relative} congestion patterns (which edges congest more than others) rather than precise speed values, the linear approximation is sufficient.
+The Greenshields model assumes that speed decreases \textit{linearly} with density. In reality, the speed-density relationship is nonlinear; alternative models such as Greenberg (logarithmic) and Underwood (exponential) better capture the sharp speed drop near jam density. We chose Greenshields because it has only two parameters ($v_{\text{free}}$ and $\rho_{\text{jam}}$), is analytically transparent, and produces qualitatively correct behavior: free flow at low density, gradual slowdown, and gridlock at jam density. Since our analysis focuses on \textit{relative} congestion patterns (which edges congest more than others) rather than precise speed values, the linear approximation is sufficient.
 
 \paragraph{Static routing.}
 Cars compute their shortest path once at spawn and follow it to their destination, regardless of congestion encountered along the way. Real drivers adapt: they check navigation apps, take side streets, or avoid visibly jammed roads. This means our simulation overestimates congestion on shortest-path bottlenecks and underestimates load on alternative routes. The effect is especially relevant for the grid topology analysis (Section~\ref{sec:gridlock}), where the grid's many parallel paths would become more useful under dynamic rerouting.
@@ -290,7 +290,7 @@ A static summary of the average density per edge across all simulation steps (Fi
 
 \subsection{Comparison: Original vs Improved}
 
-The original visualizations (Section~3) show where cars \textit{went}. These new visualizations show where cars \textit{slowed down}. Same network, same routing, but the improved model reveals congestion dynamics that the binary threshold cannot capture.
+The original visualizations (Section~3) show where cars \textit{went}. These new visualizations show where cars actually slowed down.
 
 
 % ============================================================================
@@ -319,11 +319,11 @@ A single simulation run is noisy because random car placements mean different ro
 
 Most standard network metrics (degree centrality, closeness, clustering coefficient, etc.) are defined at the \textit{node} level. However, congestion happens on \textit{edges} (road segments between intersections), and mapping node metrics to edges by averaging endpoints is not principled.
 
-\textbf{Edge betweenness centrality} is the rare exception: a metric defined directly on edges. It measures the fraction of all shortest paths in the network that traverse a given edge. Since our cars route via shortest paths, this is a direct structural prediction of traffic demand. Edges on many shortest paths should attract more cars and therefore experience higher density.
+\textbf{Edge betweenness centrality} is one of the few metrics defined directly on edges. It measures the fraction of all shortest paths in the network that traverse a given edge. Since our cars route via shortest paths, this is a direct structural prediction of traffic demand. Edges on many shortest paths should attract more cars and therefore experience higher density.
 
 \subsection{Correlation Analysis}
 
-We compute edge betweenness centrality (weighted by \texttt{travel\_time} to match how cars route) and correlate it against the empirical density from the multi-run analysis using the Spearman rank correlation coefficient \citep{spearman1904}. Unlike Pearson's correlation, which measures the strength of a \textit{linear} relationship between raw values, Spearman's correlation first converts both variables to ranks and then measures whether higher-ranked betweenness edges consistently correspond to higher-ranked density edges. This rank-based approach is appropriate here for two reasons: (1)~the relationship between betweenness and density is monotonic but not linear (the scatter plot shows increasing variance at higher betweenness values), and (2)~we care about the \textit{ordering} question (``can betweenness predict \textit{which} edges congest?'') rather than the exact functional form. Pearson correlation yields $r = 0.50$, underestimating the association by penalizing the nonlinearity, while Spearman yields $r = 0.88$, correctly reflecting the strong rank-order agreement.
+We compute edge betweenness centrality (weighted by \texttt{travel\_time} to match how cars route) and correlate it against the empirical density from the multi-run analysis. We use the Spearman rank correlation \citep{spearman1904} rather than Pearson because the relationship between betweenness and density is not linear (as visible in the scatter plot). Spearman measures whether the rankings agree, which is what we care about: can betweenness predict \textit{which} edges congest? The result is $r = 0.88$ ($p < 10^{-160}$).
 
 \begin{figure}[H]
     \centering
@@ -388,7 +388,7 @@ Edge betweenness centrality remains a strong predictor of empirical congestion d
 
 The side-by-side bar chart (Figure~\ref{fig:top15_palermo}) shows substantial overlap between the streets ranked highest by empirical density and those ranked highest by edge betweenness. Streets that serve as connectors between major intersections appear in both lists, confirming that the structural prediction is not specific to the Corrientes network.
 
-The fact that edge betweenness centrality predicts congestion on a network it was not calibrated on supports a general conclusion: in any road network where vehicles follow shortest paths, edges that lie on many shortest paths will attract disproportionate traffic, leading to higher density. This is a structural property of shortest-path routing, not an artifact of a particular network layout. The slight decrease in correlation from Corrientes to Palermo suggests that network regularity (grid structure) strengthens the prediction, but even irregular networks exhibit the relationship clearly.
+Since the prediction works on a network it was never calibrated on, the result is likely general: shortest-path routing concentrates traffic on high-betweenness edges regardless of the specific network layout. The slight decrease in correlation from Corrientes to Palermo suggests that network regularity (grid structure) strengthens the prediction, but even irregular networks exhibit the relationship clearly.
 
 
 % ============================================================================
@@ -430,16 +430,19 @@ For each topology, we sweep the number of cars from 25 to 1000 in 11 steps. At e
     \label{fig:speed_vs_cars}
 \end{figure}
 
-The three curves in Figure~\ref{fig:speed_vs_cars} tell qualitatively different stories about how each topology handles increasing load:
+The three curves in Figure~\ref{fig:speed_vs_cars} show three distinct congestion profiles:
 
 \textbf{Star/Radial (orange):} The sharpest collapse. Speed drops almost vertically between 50 and 300 cars, falling from near-free-flow to below 0.2. This is the signature of a single bottleneck: once the central hub saturates, nearly all cross-sector traffic stalls simultaneously. There is no graceful degradation; the network is either flowing or gridlocked.
 
+\vspace{0.5em}
 \textbf{Grid (blue):} A steep initial decline followed by a \textbf{plateau}. Speed falls to around 0.3--0.4 by 200 cars, but then stabilizes in that range until roughly 500 cars before continuing to decline. This plateau suggests partial gridlock: the central rows and columns (where shortest paths concentrate) are congested, but peripheral routes still flow. The grid is congested but not fully stopped, a qualitatively different regime from the star's all-or-nothing collapse.
 
+\vspace{0.5em}
 \textbf{Barab\'{a}si-Albert (purple):} The most gradual decline. Speed stays near 1.0 well past 200 cars and decreases steadily without a sharp cliff. The network degrades incrementally as progressively lower-degree hubs saturate one by one, rather than collapsing at a single critical point. Beyond approximately 700 cars, all three topologies converge to near-zero speeds.
 
-The tight standard error of the mean bands confirm that these profiles are stable properties of each topology, not artifacts of randomness.
+The tight standard error of the mean bands confirm that these differences are reproducible across runs.
 
+\vspace{0.5em}
 \subsection{Discussion}
 
 The speed curves reveal three qualitatively distinct congestion regimes, each a consequence of topology:
@@ -450,8 +453,10 @@ The speed curves reveal three qualitatively distinct congestion regimes, each a 
     \item \textbf{Barab\'{a}si-Albert: gradual degradation.} The scale-free degree distribution means a few hubs have many edges and can absorb heavy traffic before saturating. As car count increases, hubs congest one by one in order of decreasing degree, producing a smooth decline rather than a sharp cliff. The many edges connecting low-degree peripheral nodes rarely appear on shortest paths and stay uncongested until very high car counts.
 \end{itemize}
 
-This result illustrates a general principle: the same local rule can produce qualitatively different global behavior depending on the structure of the system. The Greenshields update rule is identical across all three topologies, yet the grid produces a plateau, the star produces a cliff, and the BA network produces a smooth slope.
+\vspace{0.5em}
+The same update rule on three different topologies produces three different congestion profiles: the grid plateaus, the star collapses, and the BA network slopes down gradually.
 
+\vspace{0.5em}
 The BA network's resilience suggests a design principle for real cities: a road network with a few high-capacity arterial roads (hubs) connected by many smaller streets degrades more gracefully under load than either a uniform grid or a centralized radial layout. The hub roads absorb disproportionate traffic, and when one hub saturates, traffic redistributes to others rather than cascading into system-wide gridlock. Los Angeles exemplifies this pattern: its freeway system functions as a set of high-degree hubs (the 405, 101, 10, and 110 freeways) connecting a sprawling network of surface streets. Despite its reputation for traffic, the system handles enormous volumes precisely because congestion on one freeway does not immediately paralyze the rest of the network. Drivers have alternative arterials, and the load distributes across multiple high-capacity corridors. A city built around a single central boulevard (the star topology) would collapse far more readily under the same total traffic volume.
 
 
@@ -463,14 +468,14 @@ The original ChatGPT-generated simulation's binary threshold fails to capture ho
 
 Edge betweenness centrality predicts empirical congestion density because cars follow shortest paths, and edges on many shortest paths carry more traffic. This relationship holds across both tested real-world network topologies (Spearman $r = 0.88$ on Corrientes, $r = 0.81$ on Palermo), suggesting it is a general property of shortest-path routing on road networks.
 
-The gridlock analysis on synthetic networks demonstrates that network topology determines the qualitative character of congestion: the star/radial collapses catastrophically, the grid reaches a partially-congested plateau, and the scale-free BA network degrades gradually. The same Greenshields update rule produces three distinct congestion regimes depending on topology, illustrating that local rules produce global behavior shaped fundamentally by network structure.
+The gridlock analysis on synthetic networks demonstrates that network topology determines the qualitative character of congestion: the star/radial collapses catastrophically, the grid reaches a partially-congested plateau, and the scale-free BA network degrades gradually. The same Greenshields update rule produces three distinct congestion regimes depending on topology, showing that network topology, not the update rule, determines how congestion plays out.
 
 % ============================================================================
 \section*{AI Use Statement}
 % ============================================================================
 \addcontentsline{toc}{section}{AI Use Statement}
 
-This project was completed with the assistance of Claude (Anthropic), used to format and structure the code and written text. All analysis decisions, experiment design, and interpretation of results are my own.
+In this project, AI was only used to format and structure the code and written text. All analysis decisions, experiment design, and interpretation of results are my own.
 
 \bibliography{references}
 
