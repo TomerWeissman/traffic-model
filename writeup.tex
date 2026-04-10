@@ -297,9 +297,28 @@ The original visualizations (Section~3) show where cars \textit{went}. These new
 \section{Empirical Congestion Analysis}
 % ============================================================================
 
+\subsection{Choosing the Number of Runs: Convergence Analysis}
+
+A single simulation run is noisy; random car placements mean different roads may appear congested for incidental rather than structural reasons. To determine how many independent runs are needed before the average edge density estimate stabilizes, we track the mean absolute change in per-edge average density after each successive run:
+
+\[
+\delta_k = \frac{1}{|E|} \sum_{e \in E} \left| \bar{\rho}_e^{(k)} - \bar{\rho}_e^{(k-1)} \right|
+\]
+
+\noindent where $\bar{\rho}_e^{(k)}$ is the cumulative average density on edge $e$ after $k$ runs. When $\delta_k$ is near zero, additional runs contribute negligible information.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.75\textwidth]{convergence_plot.png}
+\caption{Convergence of the average edge density estimate as a function of run count. The mean absolute change $\delta_k$ drops sharply in the first 10--15 runs and flattens thereafter, confirming that 50 runs is sufficient for a stable estimate.}
+\label{fig:convergence}
+\end{figure}
+
+As Figure~\ref{fig:convergence} shows, $\delta_k$ falls sharply in the first 10--15 runs and then levels off, confirming that 50 runs is sufficient. This justifies our ensemble size empirically rather than by arbitrary choice.
+
 \subsection{Methodology}
 
-A single simulation run is noisy because random car placements mean different roads get congested each time. To find roads that are \textit{structurally} prone to congestion, we run 50 independent simulations using the improved Greenshields model (500 cars, 100 steps each) and average the density per edge across all runs. Roads that consistently show high density are true bottlenecks, not artifacts of randomness.
+With 50 runs confirmed as sufficient by the convergence analysis above, we use this ensemble size for the full empirical study. Each of the 50 independent simulations runs the improved Greenshields model with 500 cars for 100 steps, and we average the density per edge across all runs. Edges that consistently show high density across this ensemble are true structural bottlenecks, not artifacts of any single random placement.
 
 \subsection{Results}
 
@@ -471,11 +490,34 @@ Edge betweenness centrality predicts empirical congestion density because cars f
 The gridlock analysis on synthetic networks demonstrates that network topology determines the qualitative character of congestion: the star/radial collapses catastrophically, the grid reaches a partially-congested plateau, and the scale-free BA network degrades gradually. The same Greenshields update rule produces three distinct congestion regimes depending on topology, showing that network topology, not the update rule, determines how congestion plays out.
 
 % ============================================================================
+\section*{Learning Outcomes}
+% ============================================================================
+\addcontentsline{toc}{section}{Learning Outcomes}
+
+\paragraph{\#cs110-CodeReadability.}
+We applied this LO by fixing the six bugs in the original ChatGPT-generated notebook, restructuring the code into three documented classes (\texttt{RoadNetwork}, \texttt{Car}, \texttt{TrafficSimulation}) with docstrings, and adding inline comments explaining each part of the simulation logic (Section~2).
+
+\paragraph{\#modeling.}
+We applied this LO by analyzing how the original binary threshold model works, identifying its structural limitations (binary congestion, arbitrary threshold, no position tracking), and redesigning the simulation using the Greenshields speed-density relationship framed as a cellular automaton on a network graph (Sections~3--6).
+
+\paragraph{\#dataviz.}
+We applied this LO by critiquing the original visualizations (which show traffic volume, not congestion) and building improved visualizations: car animations showing Greenshields-derived speeds, density heatmap animations showing congestion evolving over time, and static average-density heatmaps that measure actual congestion in cars/meter (Section~7). We also designed side-by-side spatial comparison maps and bar charts to visually compare empirical congestion against network metrics (Sections~9 and 10).
+
+\paragraph{\#EmpiricalAnalysis.}
+We applied this LO by running 50 independent simulations to identify structurally congested roads, performing a convergence analysis to justify the ensemble size, and repeating the analysis on a second network (Plaza Italia / Palermo) to validate our findings (Sections~8 and 10).
+
+\paragraph{\#TheoreticalAnalysis.}
+We applied this LO by identifying edge betweenness centrality as a structural predictor of congestion, computing Spearman rank correlations on two networks ($r = 0.88$ and $r = 0.81$), and analyzing how three synthetic network topologies (grid, star/radial, Barab\'{a}si-Albert) produce qualitatively different congestion regimes under the same update rule (Sections~9 and 11).
+
+\paragraph{\#composition and \#organization.}
+We applied these LOs by structuring the writeup to follow a logical progression: bug fixes, model critique, model improvement, new visualizations, empirical analysis, theoretical prediction, validation, and bonus topology analysis. Each section builds on the previous one, and figures are captioned with quantitative detail.
+
+% ============================================================================
 \section*{AI Use Statement}
 % ============================================================================
 \addcontentsline{toc}{section}{AI Use Statement}
 
-In this project, AI was only used to format and structure the code and written text. All analysis decisions, experiment design, and interpretation of results are my own.
+In this project, AI was only used to format and structure the code and written text. All analysis decisions, experiment design, and interpretation of results are our own.
 
 \bibliography{references}
 
